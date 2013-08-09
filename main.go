@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -11,13 +12,13 @@ import (
 	"time"
 )
 
-var g_slaves = flag.String("slaves", "slaves.txt", "(JSON) file containing the list of slaves")
+var g_slaves = flag.String("slaves", "slaves.json", "(JSON) file containing the list of slaves")
 var g_parallel = flag.Bool("parallel", true, "run the build-slaves in parallel")
 
 type Slave struct {
 	Addr string // slave SSH address
 	Name string // informative name of that slave
-	Root string // path under which all build files and artifacts are stored
+	Path string // path under which all build files and artifacts are stored
 }
 
 func (s *Slave) LocalCommandFileName() string {
@@ -25,7 +26,24 @@ func (s *Slave) LocalCommandFileName() string {
 }
 
 func (s *Slave) RemoteCommandFileName() string {
-	return filepath.Join(s.Root, "build.sh")
+	return filepath.Join(s.Path, "build.sh")
+}
+
+func (s *Slave) Ping() error {
+	var err error
+	ssh := exec.Command(
+		"ssh",
+		s.Addr,
+		"echo hello",
+	)
+	out, err := ssh.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf(
+			"slave [%s] did not respond (%v: %s)",
+			s.Name, err, string(out),
+		)
+	}
+	return err
 }
 
 type BuildReport struct {
@@ -41,7 +59,7 @@ type Builder struct {
 
 func (b Builder) run() BuildReport {
 	fmt.Fprintf(b.w, "## build -- start [%v]\n", time.Now())
-	fname := b.slave.CommandFileName()
+	fname := b.slave.LocalCommandFileName()
 	f, err := os.Open(fname)
 	if err != nil {
 		log.Printf(
@@ -60,7 +78,7 @@ func (b Builder) run() BuildReport {
 		ssh := exec.Command(
 			"ssh",
 			b.slave.Addr,
-			fmt.Sprintf("mkdir -p %s", b.slave.Root),
+			fmt.Sprintf("mkdir -p %s", b.slave.Path),
 		)
 		ssh.Stdout = b.w
 		ssh.Stderr = b.w
@@ -79,7 +97,7 @@ func (b Builder) run() BuildReport {
 
 	ssh := exec.Command(
 		"scp", fname,
-		fmt.Sprintf("%s:%s", b.slave.Addr, b.CommandFileName()),
+		fmt.Sprintf("%s:%s", b.slave.Addr, b.slave.RemoteCommandFileName()),
 	)
 
 	fmt.Fprintf(b.w, "## build -- copying build-script...\n")
@@ -101,7 +119,11 @@ func (b Builder) run() BuildReport {
 	ssh = exec.Command(
 		"ssh",
 		b.slave.Addr,
-		"time /build/build.sh",
+		fmt.Sprintf(
+			"time %s %s",
+			b.slave.RemoteCommandFileName(),
+			b.slave.Path,
+		),
 	)
 	fmt.Fprintf(b.w, "## build -- running build-script...\n")
 	b.w.Sync()
@@ -122,7 +144,7 @@ func (b Builder) run() BuildReport {
 	// retrieve output
 	ssh = exec.Command(
 		"scp",
-		b.slave.Addr+":/build/output/*.tar.gz", // */ dumb emacs
+		fmt.Sprintf("%s:%s/output/*.tar.gz", b.slave.Addr, b.slave.Path), // */ dumb emacs
 		"output/.",
 	)
 	fmt.Fprintf(b.w, "## build -- retrieving output(s)...\n")
@@ -140,6 +162,29 @@ func (b Builder) run() BuildReport {
 			err,
 		}
 	}
+
+	ssh = exec.Command(
+		"ssh",
+		b.slave.Addr,
+		fmt.Sprintf(
+			"/bin/rm -rf %s",
+			b.slave.Path,
+		),
+	)
+
+	fmt.Fprintf(b.w, "## build -- cleaning up...\n")
+	b.w.Sync()
+	ssh.Stdout = b.w
+	ssh.Stderr = b.w
+	err = ssh.Run()
+	if err != nil {
+		return BuildReport{
+			b.slave,
+			"clean-up failed",
+			err,
+		}
+	}
+
 	return BuildReport{b.slave, "ok", nil}
 }
 
@@ -163,17 +208,9 @@ func main() {
 	builders := make([]*Builder, 0, len(slaves))
 
 	for _, slave := range slaves {
-		ssh := exec.Command(
-			"ssh",
-			slave.Addr,
-			"echo hello",
-		)
-		out, err := ssh.CombinedOutput()
+		err = slave.Ping()
 		if err != nil {
-			log.Printf(
-				"slave [%s] did not respond (%v: %s)\n",
-				slave.Name, err, string(out),
-			)
+			log.Printf("%s\n", err.Error())
 			continue
 		}
 		//fmt.Printf("--- slave [%s] ---\n%v\n", slave.Name, string(out))
@@ -182,7 +219,7 @@ func main() {
 			log.Panicf("could create logs directory ! (err=%v)\n", err)
 		}
 
-		fname := fmt.Sprintf("logs/%s.txt", slave.Name)
+		fname := filepath.Join("logs", fmt.Sprintf("%s.txt", slave.Name))
 		logfile, err := os.Create(fname)
 		if err != nil {
 			log.Printf(
@@ -190,6 +227,15 @@ func main() {
 				fname, slave.Name, err,
 			)
 		}
+		tmpdir, err := ioutil.TempDir("", "go-bldbot-")
+		if err != nil {
+			log.Panicf("could not create tempdir for slave [%s] (err=%v)\n",
+				slave.Name, err,
+			)
+		}
+		slave.Path = tmpdir
+		os.RemoveAll(tmpdir)
+
 		builders = append(builders, &Builder{
 			slave: slave,
 			w:     logfile,
@@ -198,7 +244,12 @@ func main() {
 
 	fmt.Printf(">>> found the following builders:\n")
 	for _, builder := range builders {
-		fmt.Printf(" %s \t(%s)\n", builder.slave.Name, builder.slave.Addr)
+		fmt.Printf(
+			" %s \t(%s:%s)\n",
+			builder.slave.Name,
+			builder.slave.Addr,
+			builder.slave.Path,
+		)
 	}
 
 	fmt.Printf(">>> launching builders... (parallel=%v)\n", *g_parallel)
