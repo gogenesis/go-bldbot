@@ -219,6 +219,11 @@ func main() {
 			log.Panicf("could create logs directory ! (err=%v)\n", err)
 		}
 
+		err = os.MkdirAll("output", 0755)
+		if err != nil {
+			log.Panicf("could create output directory ! (err=%v)\n", err)
+		}
+
 		fname := filepath.Join("logs", fmt.Sprintf("%s.txt", slave.Name))
 		logfile, err := os.Create(fname)
 		if err != nil {
