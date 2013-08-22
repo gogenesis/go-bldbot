@@ -211,8 +211,8 @@ func main() {
 		log.Panicf("buildbot: could not decode file [%s] (%v)\n", *g_config, err)
 	}
 
-	//fmt.Printf(">>> %v\n", slaves)
 	slaves := config.Slaves
+	//fmt.Printf(">>> %v\n", slaves)
 	builders := make([]*Builder, 0, len(slaves))
 
 	for _, slave := range slaves {
