@@ -240,7 +240,7 @@ func main() {
 				fname, slave.Name, err,
 			)
 		}
-		tmpdir, err := ioutil.TempDir("", "go-bldbot-")
+		tmpdir, err := ioutil.TempDir("", "go-bldbot-"+time.Now().Format("20060102")+"-")
 		if err != nil {
 			log.Panicf("could not create tempdir for slave [%s] (err=%v)\n",
 				slave.Name, err,
