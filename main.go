@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -10,9 +9,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"time"
+
+	yml "github.com/gonuts/yaml"
 )
 
-var g_slaves = flag.String("slaves", "slaves.json", "(JSON) file containing the list of slaves")
+var g_slaves = flag.String("slaves", "slaves.yaml", "(YAML) file containing the list of slaves")
 var g_parallel = flag.Bool("parallel", true, "run the build-slaves in parallel")
 
 type Slave struct {
@@ -198,7 +199,8 @@ func main() {
 		log.Panicf("buildbot: could not open file [%s] (%v)\n", *g_slaves, err)
 	}
 	defer f.Close()
-	err = json.NewDecoder(f).Decode(&slaves)
+	in, err := ioutil.ReadAll(f)
+	err = yml.Unmarshal(in, &slaves)
 	if err != nil {
 		log.Panicf("buildbot: could not decode file [%s] (%v)\n", *g_slaves, err)
 	}
