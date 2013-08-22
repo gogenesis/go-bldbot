@@ -13,8 +13,12 @@ import (
 	yml "github.com/gonuts/yaml"
 )
 
-var g_slaves = flag.String("slaves", "slaves.yaml", "(YAML) file containing the list of slaves")
+var g_config = flag.String("config", "config.yaml", "(YAML) file containing the list of slaves")
 var g_parallel = flag.Bool("parallel", true, "run the build-slaves in parallel")
+
+type Config struct {
+	Slaves []Slave
+}
 
 type Slave struct {
 	Addr string // slave SSH address
@@ -193,20 +197,22 @@ func main() {
 	fmt.Printf(">>>\n>>> buildbot <<<\n>>>\n")
 	flag.Parse()
 
-	slaves := make([]Slave, 0, 2)
-	f, err := os.Open(*g_slaves)
+	config := Config{
+		Slaves: make([]Slave, 0, 2),
+	}
+	f, err := os.Open(*g_config)
 	if err != nil {
-		log.Panicf("buildbot: could not open file [%s] (%v)\n", *g_slaves, err)
+		log.Panicf("buildbot: could not open file [%s] (%v)\n", *g_config, err)
 	}
 	defer f.Close()
 	in, err := ioutil.ReadAll(f)
-	err = yml.Unmarshal(in, &slaves)
+	err = yml.Unmarshal(in, &config)
 	if err != nil {
-		log.Panicf("buildbot: could not decode file [%s] (%v)\n", *g_slaves, err)
+		log.Panicf("buildbot: could not decode file [%s] (%v)\n", *g_config, err)
 	}
 
 	//fmt.Printf(">>> %v\n", slaves)
-
+	slaves := config.Slaves
 	builders := make([]*Builder, 0, len(slaves))
 
 	for _, slave := range slaves {
