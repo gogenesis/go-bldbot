@@ -211,6 +211,11 @@ func main() {
 		log.Panicf("buildbot: could not decode file [%s] (%v)\n", *g_config, err)
 	}
 
+	if len(config.Slaves) <= 0 {
+		log.Printf("buildbot: found no slave to send work to.\n")
+		os.Exit(2)
+	}
+
 	slaves := config.Slaves
 	//fmt.Printf(">>> %v\n", slaves)
 	builders := make([]*Builder, 0, len(slaves))
